@@ -397,7 +397,6 @@ data_source:
   pca: false
   pca_scenario: false
   geopy: false
-  calculate_distances: false
   rtn: false
   solar_cycle: false
 legacy_data:
@@ -411,3 +410,8 @@ legacy_data:
     Hazardous PCA-landfill distances: pca_landfills_distances_SA.csv
     Site-landfill distances: site_landfills_distances.csv
     Recycler data: Recyclers_data.csv
+    Universal Waste Landfills data: Universal_Waste_Landfills_data.csv
+    Universal Waste Recyclers data: Universal_Waste_Recyclers_data.csv
+    Solar Cycle landfill data: wbj_solar_cycle_combined.csv
+    RTN recycler data: recycler_data.csv
+    Solar Cycle landfill distances: site_landfill_distances.csv

@@ -76,6 +76,9 @@ def run_single(
     data = DataLoader(paths).load_all(
         resolution=config.consumer.resolution,
         model_states=config.consumer.model_states,
+        rtn=config.data_source.rtn,
+        solar_cycle=config.data_source.solar_cycle,
+        file_names=config.legacy_data.file_name.model_dump(by_alias=True),
     )
 
     run_id = (
@@ -102,6 +105,107 @@ def run_single(
     )
 
     return output_path
+
+
+def generate_distances(
+    config_path: Path,
+    paths_yaml: Path | None,
+    project_root: Path,
+) -> None:
+    """
+    Generate distance-matrix CSVs for the mode(s) in the given config.
+
+    This reproduces the distance computation formerly run inline inside
+    ``ABM_CE_PV.__init__`` (behind a now-removed config flag), as a
+    standalone step: no agents, network, PV_ICE, or cost setup, and no
+    simulation is run. The written CSVs are the same files a normal run
+    reads via ``DataLoader.load_all``.
+
+    Parameters
+    ----------
+    config_path
+        Path to the simulation configuration YAML file.
+    paths_yaml
+        Optional path to a data-paths YAML file. When omitted, default
+        project-relative paths are used.
+    project_root
+        Root directory of the ABSiCE repository. Distance CSVs are written
+        under ``project_root/RTN``, ``project_root/SolarCycle``, or
+        ``project_root/TEMP`` depending on the config's rtn/solar_cycle
+        flags.
+    """
+    from ABM_CE_PV_Model import (
+        build_pca_data,
+        filter_uspvdb_for_model,
+        write_distance_files,
+    )
+    from utils import ConsumerAgentResolution
+
+    project_root = project_root.resolve()
+
+    config_path = _resolve_runtime_path(
+        path=config_path,
+        project_root=project_root,
+    )
+
+    if paths_yaml is not None:
+        paths_yaml = _resolve_runtime_path(
+            path=paths_yaml,
+            project_root=project_root,
+        )
+
+    config = SimulationConfig.from_yaml(config_path)
+
+    paths = _resolve_paths(
+        paths_yaml=paths_yaml,
+        project_root=project_root,
+    )
+
+    file_names = config.legacy_data.file_name.model_dump(by_alias=True)
+
+    # Legacy generation code reads/writes several paths relative to the
+    # current working directory; reset to project_root for safety, like
+    # _worker does for batch replicates.
+    os.chdir(project_root)
+
+    try:
+        inputs = DataLoader(paths).load_distance_generation_inputs(
+            resolution=config.consumer.resolution,
+            model_states=config.consumer.model_states,
+            rtn=config.data_source.rtn,
+            solar_cycle=config.data_source.solar_cycle,
+            file_names=file_names,
+        )
+
+        uspvdb = None
+        pca_data = None
+
+        if config.consumer.resolution == ConsumerAgentResolution.SITE:
+            if inputs.uspvdb is None:
+                raise ValueError(
+                    "USPVDB data is required for site-level resolution."
+                )
+
+            uspvdb = filter_uspvdb_for_model(
+                inputs.uspvdb, inputs.pvice_waste_eol_df
+            )
+
+        if config.consumer.resolution == ConsumerAgentResolution.PCA:
+            pca_data = build_pca_data(inputs.gis_centroids)
+
+        write_distance_files(
+            resolution=config.consumer.resolution,
+            rtn=config.data_source.rtn,
+            solar_cycle=config.data_source.solar_cycle,
+            recycler_data=inputs.recycler_data,
+            uspvdb=uspvdb,
+            pca_data=pca_data,
+            file_names=file_names,
+            landfill_data_params=config.legacy_data.landfill_data_params.model_dump(),
+            model_dir=project_root,
+        )
+    finally:
+        os.chdir(project_root)
 
 
 def run_batch(
@@ -343,6 +447,9 @@ def _worker(
         data = DataLoader(paths).load_all(
             resolution=config.consumer.resolution,
             model_states=config.consumer.model_states,
+            rtn=config.data_source.rtn,
+            solar_cycle=config.data_source.solar_cycle,
+            file_names=config.legacy_data.file_name.model_dump(by_alias=True),
         )
 
         output_path = _make_output_path(

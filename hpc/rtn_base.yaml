@@ -417,7 +417,6 @@ data_source:
   pca: false
   pca_scenario: false
   geopy: false
-  calculate_distances: false
   rtn: false
   solar_cycle: false
 legacy_data:

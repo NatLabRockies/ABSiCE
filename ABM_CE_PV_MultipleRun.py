@@ -41,6 +41,9 @@ def run(
     data = DataLoader(paths).load_all(
         resolution=config.consumer.resolution,
         model_states=config.consumer.model_states,
+        rtn=config.data_source.rtn,
+        solar_cycle=config.data_source.solar_cycle,
+        file_names=config.legacy_data.file_name.model_dump(by_alias=True),
     )
 
     print("Creating model...")

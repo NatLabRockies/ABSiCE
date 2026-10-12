@@ -708,7 +708,6 @@ class DataSourceConfig(ConfigBaseModel):
     pca: bool = False
     pca_scenario: bool = False
     geopy: bool = False
-    calculate_distances: bool = False
     rtn: bool = False
     solar_cycle: bool = False
 
@@ -771,6 +770,31 @@ class FileNameConfig(ConfigBaseModel):
     rtn_landfill_data: str = Field(
         default="LandfillCostsbyYearAllLandfills.csv",
         alias="RTN landfill data",
+    )
+
+    universal_waste_landfills_data: str = Field(
+        default="Universal_Waste_Landfills_data.csv",
+        alias="Universal Waste Landfills data",
+    )
+
+    universal_waste_recyclers_data: str = Field(
+        default="Universal_Waste_Recyclers_data.csv",
+        alias="Universal Waste Recyclers data",
+    )
+
+    solar_cycle_landfill_data: str = Field(
+        default="wbj_solar_cycle_combined.csv",
+        alias="Solar Cycle landfill data",
+    )
+
+    rtn_recycler_data: str = Field(
+        default="recycler_data.csv",
+        alias="RTN recycler data",
+    )
+
+    solar_cycle_landfill_distances: str = Field(
+        default="site_landfill_distances.csv",
+        alias="Solar Cycle landfill distances",
     )
 
 

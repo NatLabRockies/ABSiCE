@@ -130,8 +130,7 @@ if __name__ == '__main__':
         "pv_ice": False,
         "pca": False,
         "pca_scenario": False,
-        "geopy": False,
-        "calculate_distances": False}
+        "geopy": False}
 
     # The variables parameters will be invoke along with the fixed parameters
     # allowing for either or both to be honored.

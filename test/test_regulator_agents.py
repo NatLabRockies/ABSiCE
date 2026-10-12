@@ -29,7 +29,6 @@ class TestRegulatorPolicies(unittest.TestCase):
     def setUpClass(cls):
         cls.model = ABM_CE_PV(
             model_states=["WA", "CA"],
-            calculate_distances=False,
             solar_cycle=False,
             rtn=False,
         )
