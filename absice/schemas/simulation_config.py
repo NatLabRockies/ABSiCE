@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from absice.data.cost_units import metric_ton_cost_to_module, module_cost_to_metric_ton
 # Import existing enums. Do not redefine them here.
 from utils import ConsumerAgentResolution, TIMESTEP
 
@@ -100,12 +101,15 @@ def _default_total_number_product() -> list[int]:
 
 
 def _default_landfill_cost() -> list[float]:
+    # $/module per state; DataLoader converts to $/metric ton.
     return [
-        1156, 961, 922, 896, 727, 558, 870, 1429, 1104, 1065,
-        1026, 961, 896, 883, 883, 675, 675, 662, 961, 805,
-        636, 636, 610, 416, 636, 844, 831, 805, 675, 623,
-        623, 571, 545, 506, 506, 584, 714, 649, 636, 571,
-        571, 506, 429, 390, 533, 649, 520, 520, 494, 429,
+        2.403, 1.998, 1.917, 1.863, 1.512, 1.161, 1.809, 2.97,
+        2.295, 2.214, 2.133, 1.998, 1.863, 1.836, 1.836, 1.404,
+        1.404, 1.377, 1.998, 1.674, 1.323, 1.323, 1.269, 0.864,
+        1.323, 1.755, 1.728, 1.674, 1.404, 1.296, 1.296, 1.188,
+        1.134, 1.053, 1.053, 1.215, 1.485, 1.35, 1.323, 1.188,
+        1.188, 1.053, 0.891, 0.81, 1.107, 1.35, 1.08, 1.08,
+        1.026, 0.81,
     ]
 
 
@@ -368,16 +372,30 @@ class TpbConfig(ConfigBaseModel):
 # Cost configuration
 # -----------------------------------------------------------------------------
 class CostConfig(ConfigBaseModel):
-    """Cost and market-price parameters."""
+    """
+    Cost and market-price parameters.
 
+    The $/module inputs marked below are written in $/module in YAML and
+    defaults, but the fields hold $/metric ton once validated (and are written
+    back as $/module). Hazardous premiums are $/metric ton, transport rates
+    $/metric ton/km.
+    """
+
+    # Fields already hold $/metric ton, so assignment must not convert again.
+    model_config = ConfigDict(validate_assignment=False)
+
+    # $/module per storage year, [minimum, maximum, mode]
+    # www.cisco-eagle.com (accessed 12/2019)
     hoarding_cost: list[float] = Field(
-        default_factory=lambda: [0.0, 130.0, 65.0]
+        default_factory=lambda: [0.0, 0.27, 0.135]
     )
 
+    # $/module per state; EPRI (2018) was cited for the original default
     landfill_cost: list[float] = Field(
         default_factory=_default_landfill_cost
     )
 
+    # $/metric ton
     hazardous_waste_management_cost: dict[str, float] = Field(
         default_factory=lambda: {
             "repair": 0.0,
@@ -388,15 +406,13 @@ class CostConfig(ConfigBaseModel):
         }
     )
 
+    # $/module, [minimum, maximum, mode]; EPRI (2026, unpublished)
     original_recycling_cost: list[float] = Field(
-        default_factory=lambda: [
-            400.0 - 1e-6,
-            400.0 + 1e-6,
-            400.0,
-        ]
+        default_factory=lambda: [12.49, 12.51, 12.5]
     )
 
-    recycling_learning_shape_factor: float = -0.01
+    # Hanes et al. (2021)
+    recycling_learning_shape_factor: float = -0.074
 
     repairability: float = Field(
         default=0.55,
@@ -404,26 +420,28 @@ class CostConfig(ConfigBaseModel):
         le=1.0,
     )
 
+    # $/module, [minimum, maximum, mode]; Tsanakas et al. (2019), IRENA-IEA (2016)
     original_repairing_cost: list[float] = Field(
-        default_factory=lambda: [
-            12987.0,
-            58442.0,
-            29870.0,
-        ]
+        default_factory=lambda: [27.0, 122.0, 62.0]
     )
 
+    # Estimated from repairing costs at different scales, JRC (2019)
     repairing_learning_shape_factor: float = -0.31
 
+    # Unpublished study, Wang et al.
     scndhand_mkt_pric_rate: list[float] = Field(
         default_factory=lambda: [0.4, 0.2]
     )
 
-    fsthand_mkt_pric: float = 58442.0
+    # $/module
+    fsthand_mkt_pric: float = 122.0
 
+    # [amplitude in $/module, decay per year]
     fsthand_mkt_pric_reg_param: list[float] = Field(
         default_factory=lambda: [1.0, 0.04]
     )
 
+    # Duvan & Aykaç (2008), www.investopedia.com (accessed 03/2020)
     refurbisher_margin: list[float] = Field(
         default_factory=lambda: [0.4, 0.6, 0.5]
     )
@@ -438,6 +456,7 @@ class CostConfig(ConfigBaseModel):
         ge=0.0,
     )
 
+    # Unpublished study, Wang et al.
     used_product_substitution_rate: list[float] = Field(
         default_factory=lambda: [0.6, 1.0, 0.8]
     )
@@ -447,10 +466,61 @@ class CostConfig(ConfigBaseModel):
         ge=0.0,
     )
 
-    sa_landfill_costs: tuple[bool, float] = (
-        False,
-        481.0,
+    # (enabled, $/module)
+    sa_landfill_costs: tuple[bool, float] = (False, 0.999)
+
+    @field_validator(
+        "hoarding_cost",
+        "landfill_cost",
+        "original_recycling_cost",
+        "original_repairing_cost",
+        "fsthand_mkt_pric",
     )
+    @classmethod
+    def module_costs_to_metric_ton(
+        cls, value: float | list[float],
+    ) -> float | list[float]:
+        """Convert $/module inputs to $/metric ton."""
+        return module_cost_to_metric_ton(value)
+
+    @field_validator("fsthand_mkt_pric_reg_param")
+    @classmethod
+    def price_amplitude_to_metric_ton(cls, value: list[float]) -> list[float]:
+        """Convert the price amplitude; the decay is per year."""
+        return [module_cost_to_metric_ton(value[0]), value[1]]
+
+    @field_validator("sa_landfill_costs")
+    @classmethod
+    def sa_landfill_cost_to_metric_ton(
+        cls, value: tuple[bool, float],
+    ) -> tuple[bool, float]:
+        """Convert the landfill sensitivity price."""
+        return (value[0], module_cost_to_metric_ton(value[1]))
+
+    @field_serializer(
+        "hoarding_cost",
+        "landfill_cost",
+        "original_recycling_cost",
+        "original_repairing_cost",
+        "fsthand_mkt_pric",
+    )
+    def module_costs_from_metric_ton(
+        self, value: float | list[float],
+    ) -> float | list[float]:
+        """Write costs back as $/module."""
+        return metric_ton_cost_to_module(value)
+
+    @field_serializer("fsthand_mkt_pric_reg_param")
+    def price_amplitude_from_metric_ton(self, value: list[float]) -> list[float]:
+        """Write the price amplitude back as $/module."""
+        return [metric_ton_cost_to_module(value[0]), value[1]]
+
+    @field_serializer("sa_landfill_costs")
+    def sa_landfill_cost_from_metric_ton(
+        self, value: tuple[bool, float],
+    ) -> tuple[bool, float]:
+        """Write the landfill sensitivity price back as $/module."""
+        return (value[0], metric_ton_cost_to_module(value[1]))
 
 
 # -----------------------------------------------------------------------------
@@ -658,11 +728,12 @@ class ScenarioConfig(ConfigBaseModel):
 class TclpConfig(ConfigBaseModel):
     """Toxicity Characteristic Leaching Procedure parameters."""
 
-    bsf_mean: float = Field(default=2.18, ge=0.0)
-    bsf_std: float = Field(default=0.86, gt=0.0)
+    # values taken from Li et al., 2025
+    bsf_mean: float = Field(default=3.35, ge=0.0)
+    bsf_std: float = Field(default=1.17, gt=0.0)
 
-    non_bsf_mean: float = Field(default=3.20, ge=0.0)
-    non_bsf_std: float = Field(default=1.33, gt=0.0)
+    non_bsf_mean: float = Field(default=1.85, ge=0.0)
+    non_bsf_std: float = Field(default=0.97, gt=0.0)
 
     k: float = Field(default=0.30, ge=0.0)
     a50: float = Field(default=15.0, ge=0.0)
@@ -708,7 +779,6 @@ class DataSourceConfig(ConfigBaseModel):
     pca: bool = False
     pca_scenario: bool = False
     geopy: bool = False
-    calculate_distances: bool = False
     rtn: bool = False
     solar_cycle: bool = False
 
@@ -771,6 +841,31 @@ class FileNameConfig(ConfigBaseModel):
     rtn_landfill_data: str = Field(
         default="LandfillCostsbyYearAllLandfills.csv",
         alias="RTN landfill data",
+    )
+
+    universal_waste_landfills_data: str = Field(
+        default="Universal_Waste_Landfills_data.csv",
+        alias="Universal Waste Landfills data",
+    )
+
+    universal_waste_recyclers_data: str = Field(
+        default="Universal_Waste_Recyclers_data.csv",
+        alias="Universal Waste Recyclers data",
+    )
+
+    solar_cycle_landfill_data: str = Field(
+        default="wbj_solar_cycle_combined.csv",
+        alias="Solar Cycle landfill data",
+    )
+
+    rtn_recycler_data: str = Field(
+        default="recycler_data.csv",
+        alias="RTN recycler data",
+    )
+
+    solar_cycle_landfill_distances: str = Field(
+        default="site_landfill_distances.csv",
+        alias="Solar Cycle landfill distances",
     )
 
 

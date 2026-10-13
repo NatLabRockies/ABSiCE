@@ -6,8 +6,16 @@ Uses a real ABM_CE_PV model instance (shared across tests via setUpClass)
 with a minimal configuration to keep startup time low.
 """
 
+import os
 import unittest
+from pathlib import Path
+
 from ABM_CE_PV_Model import ABM_CE_PV
+from absice.data.data_loader import DataLoader
+from absice.schemas.data_paths_config import DataPathsConfig
+from absice.schemas.simulation_config import SimulationConfig
+
+PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
 
 def _find_regulator(model, state: str):
@@ -27,12 +35,23 @@ class TestRegulatorPolicies(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.model = ABM_CE_PV(
-            model_states=["WA", "CA"],
-            calculate_distances=False,
-            solar_cycle=False,
-            rtn=False,
+        config: SimulationConfig = SimulationConfig()
+        config.consumer.model_states = ["WA", "CA"]
+        config.data_source.solar_cycle = False
+        config.data_source.rtn = False
+        data = DataLoader(DataPathsConfig.make_default(PROJECT_ROOT)).load_all(
+            resolution=config.consumer.resolution,
+            model_states=config.consumer.model_states,
+            rtn=config.data_source.rtn,
+            solar_cycle=config.data_source.solar_cycle,
+            file_names=config.legacy_data.file_name.model_dump(by_alias=True),
         )
+        # Model resolves paths from cwd and PV_ICE chdirs into a subfolder.
+        os.chdir(PROJECT_ROOT)
+        try:
+            cls.model = ABM_CE_PV(config=config, data=data)
+        finally:
+            os.chdir(PROJECT_ROOT)
 
     # ------------------------------------------------------------------
     # _load_policy_schedule_by_state

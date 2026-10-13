@@ -209,6 +209,9 @@ def test_run_single_loads_data_and_saves_results(
     mock_loader.load_all.assert_called_once_with(
         resolution=config.consumer.resolution,
         model_states=config.consumer.model_states,
+        rtn=config.data_source.rtn,
+        solar_cycle=config.data_source.solar_cycle,
+        file_names=config.legacy_data.file_name.model_dump(by_alias=True),
     )
 
     mock_execute.assert_called_once_with(

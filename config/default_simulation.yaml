@@ -21,10 +21,14 @@ network:
 consumer:
   resolution: site
   model_states: null
+  # Other values based on EIA (2019) and SBE Council (2019): residential 0.75,
+  # commercial 0.2, utility 0.05.
   consumers_distribution:
     residential: 1.0
     commercial: 0.0
     utility: 0.0
+  # Other values based on Bolinger et al. (2018): residential 0.21,
+  # commercial 0.18, utility 0.61.
   product_distribution:
     residential: 1.0
     commercial: 0.0
@@ -51,27 +55,32 @@ product:
   - 4207
   - 4905
   - 5719
+  # IRENA-IEA (2016).
   product_growth:
   - 0.166
   - 0.045
   growth_threshold: 10
+  # IRENA-IEA (2016).
   failure_rate_alpha:
   - 2.4928
   - 5.3759
   - 3.93495
+  # Years; IRENA-IEA (2016).
   product_lifetime: 30
   product_average_wght: 0.1
   mass_to_function_reg_coeff: 0.03
+  # Years; Wilson et al. (2017).
   max_storage:
   - 1.0
   - 8.0
   - 4.0
 eol:
+  # Monteiro Lunardi et al. (2018) and European Commission (2015).
   init_eol_rate:
     repair: 0.005
     sell: 0.01
-    recycle: 0.1
-    landfill: 0.885
+    recycle: 0.2
+    landfill: 0.785
     hoard: 0.0
   all_eol_pathways:
     repair: true
@@ -92,15 +101,20 @@ tpb:
     residential: true
     commercial: true
     utility: true
+  # EoL weights: Geiger et al. (2019), subsequently calibrated.
   w_sn_eol: 0.23
   w_pbc_eol: 0.44
   w_a_eol: 0.59
+  # Reuse weights: Singhal et al. (2019).
   w_sn_reuse: 0.497
   w_pbc_reuse: 0.382
   w_a_reuse: 0.464
+  # [mean, std]: mean from the model's calibration, std from Saphores (2012).
   att_distrib_param_eol:
   - 0.515
   - 0.1
+  # [mean, std]: mean from the model's calibration, std from Abbey et al.
+  # (2016).
   att_distrib_param_reuse:
   - 0.01
   - 0.185
@@ -112,91 +126,106 @@ tpb:
     - 0.5
     - 0.49
 cost:
+  # Monetary inputs are USD/module (DataLoader converts to USD/metric ton);
+  # hoarding is per storage year. Triangular lists are [minimum, maximum, mode].
+  # www.cisco-eagle.com (accessed 12/2019).
   hoarding_cost:
   - 0.0
-  - 130.0
-  - 65.0
+  - 0.27
+  - 0.135
+  # EPRI (2018), cited for the original default.
   landfill_cost:
-  - 1156.0
-  - 961.0
-  - 922.0
-  - 896.0
-  - 727.0
-  - 558.0
-  - 870.0
-  - 1429.0
-  - 1104.0
-  - 1065.0
-  - 1026.0
-  - 961.0
-  - 896.0
-  - 883.0
-  - 883.0
-  - 675.0
-  - 675.0
-  - 662.0
-  - 961.0
-  - 805.0
-  - 636.0
-  - 636.0
-  - 610.0
-  - 416.0
-  - 636.0
-  - 844.0
-  - 831.0
-  - 805.0
-  - 675.0
-  - 623.0
-  - 623.0
-  - 571.0
-  - 545.0
-  - 506.0
-  - 506.0
-  - 584.0
-  - 714.0
-  - 649.0
-  - 636.0
-  - 571.0
-  - 571.0
-  - 506.0
-  - 429.0
-  - 390.0
-  - 533.0
-  - 649.0
-  - 520.0
-  - 520.0
-  - 494.0
-  - 429.0
+  - 2.403
+  - 1.998
+  - 1.917
+  - 1.863
+  - 1.512
+  - 1.161
+  - 1.809
+  - 2.97
+  - 2.295
+  - 2.214
+  - 2.133
+  - 1.998
+  - 1.863
+  - 1.836
+  - 1.836
+  - 1.404
+  - 1.404
+  - 1.377
+  - 1.998
+  - 1.674
+  - 1.323
+  - 1.323
+  - 1.269
+  - 0.864
+  - 1.323
+  - 1.755
+  - 1.728
+  - 1.674
+  - 1.404
+  - 1.296
+  - 1.296
+  - 1.188
+  - 1.134
+  - 1.053
+  - 1.053
+  - 1.215
+  - 1.485
+  - 1.35
+  - 1.323
+  - 1.188
+  - 1.188
+  - 1.053
+  - 0.891
+  - 0.81
+  - 1.107
+  - 1.35
+  - 1.08
+  - 1.08
+  - 1.026
+  - 0.81
+  # Management premiums are USD/metric ton.
   hazardous_waste_management_cost:
     repair: 0.0
     sell: 0.0
     recycle: 0.0
     landfill: 0.0
     hoard: 0.0
+  # Processing only (12.5 USD/module = 0.661 USD/kg), before transport.
+  # EPRI (2026, unpublished).
   original_recycling_cost:
-  - 399.999999
-  - 400.000001
-  - 400.0
-  recycling_learning_shape_factor: -0.01
+  - 12.49
+  - 12.51
+  - 12.5
+  # Hanes et al. (2021).
+  recycling_learning_shape_factor: -0.074
   repairability: 0.55
+  # Tsanakas et al. (2019); IRENA-IEA (2016).
   original_repairing_cost:
-  - 12987.0
-  - 58442.0
-  - 29870.0
+  - 27.0
+  - 122.0
+  - 62.0
+  # Estimated from repairing costs at different scales, JRC (2019).
   repairing_learning_shape_factor: -0.31
+  # Unpublished study, Wang et al.
   scndhand_mkt_pric_rate:
   - 0.4
   - 0.2
-  fsthand_mkt_pric: 58442.0
+  fsthand_mkt_pric: 122.0
+  # [amplitude in USD/module, decay per year]
   fsthand_mkt_pric_reg_param:
   - 1.0
   - 0.04
+  # Duvan & Aykaç (2008) and www.investopedia.com (accessed 03/2020).
   refurbisher_margin:
   - 0.4
   - 0.6
   - 0.5
+  # Transport rates are USD/metric ton/km.
   transportation_cost: 0.095
   hazardous_transportation_cost: 0.395
+  # Unpublished study, Wang et al.
   used_product_substitution_rate:
   - 0.6
   - 1.0
@@ -204,7 +233,7 @@ cost:
   imperfect_substitution: 0.0
   sa_landfill_costs:
   - false
-  - 481.0
+  - 0.999  # USD/module
 material:
   product_mass_fractions:
     Product: 1.0
@@ -222,6 +251,8 @@ material:
     Insulated cable: true
     Silicon: false
     Silver: false
+  # www.Infomine.com (2019), copper.org (2019), USGS (2017), Bureau of Labor
+  # Statistics (2018), www.recyclingproductnews.com (websites accessed 03/2020).
   scd_mat_prices:
     Product:
     - .nan
@@ -251,6 +282,8 @@ material:
     - 453.0
     - 653.0
     - 582.0
+  # Butler et al. (2005), Newlove (2017), USGS (2017), www.infomine.com (2019),
+  # expert opinions for insulated cables (websites accessed 03/2020).
   virgin_mat_prices:
     Product:
     - .nan
@@ -307,6 +340,8 @@ scenario:
   - Kentucky
   - South Carolina
   epr_business_model: false
+  # FRELP, ASU and hybrid parameters: Heath et al., unpublished
+  # techno-economic analysis.
   recycling_process:
     frelp: false
     asu: false
@@ -328,14 +363,20 @@ scenario:
     number_seed: 50
     discount: 0.35
   hazardous_waste_regulation_enabled: false
+  # Research by Taylor Curtis.
   landfill_solar_waste_acceptance_ratio: 0.4
+# Defaults from Li, F., Tatapudi, S. R., Shaw, S. L., Libby, C., Bicer, B., &
+# TamizhMani, G. (2025). Photovoltaic module leach testing: Database
+# development and statistical analysis. Journal of Environmental Management,
+# 377, 124666.
 tclp:
-  bsf_mean: 2.18
-  bsf_std: 0.86
-  non_bsf_mean: 3.2
-  non_bsf_std: 1.33
+  bsf_mean: 3.35
+  bsf_std: 1.17
+  non_bsf_mean: 1.85
+  non_bsf_std: 0.97
   k: 0.3
   a50: 15.0
+  # mg/L Pb hazard threshold per EPA (the CA STLC test has the same threshold).
   hazard_cutoff:
     federal: 5.0
     AL: 5.0
@@ -393,7 +434,6 @@ data_source:
   pca: false
   pca_scenario: false
   geopy: false
-  calculate_distances: false
   rtn: false
   solar_cycle: false
 legacy_data:
@@ -407,3 +447,8 @@ legacy_data:
     Hazardous PCA-landfill distances: pca_landfills_distances_SA.csv
     Site-landfill distances: site_landfills_distances.csv
     Recycler data: Recyclers_data.csv
+    Universal Waste Landfills data: Universal_Waste_Landfills_data.csv
+    Universal Waste Recyclers data: Universal_Waste_Recyclers_data.csv
+    Solar Cycle landfill data: wbj_solar_cycle_combined.csv
+    RTN recycler data: recycler_data.csv
+    Solar Cycle landfill distances: site_landfill_distances.csv

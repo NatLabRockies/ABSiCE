@@ -18,6 +18,7 @@ class LoadedData(BaseModel):
     gis_centroids: pd.DataFrame
     recycler_data: pd.DataFrame
     landfill_cost_df: pd.DataFrame
+    recycling_costs_raw: pd.DataFrame
     hazardous_landfill_cost_df: pd.DataFrame
     uw_landfill_data: pd.DataFrame
     uw_recycler_data: pd.DataFrame
@@ -41,6 +42,24 @@ class LoadedData(BaseModel):
     pca_dataout_by_pca: dict[str, pd.DataFrame]
     pca_datain_by_pca: dict[str, pd.DataFrame]
 
+
+class DistanceGenerationInputs(BaseModel):
+    """Facility/site inputs needed to compute distance matrices.
+
+    Deliberately excludes all distance-file reads: this is the slim
+    container used by ``generate-distances``, which computes (and writes)
+    the distance files that ``LoadedData.*_distance_df`` would otherwise
+    read.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    recycler_data: pd.DataFrame
+    gis_centroids: pd.DataFrame
+    pvice_waste_eol_df: pd.DataFrame
+    uspvdb: pd.DataFrame | None
+
+
 class DataLoader:
     """Load external files using paths supplied by DataPathsConfig."""
 
@@ -51,8 +70,18 @@ class DataLoader:
         self,
         resolution: str | Enum,
         model_states: list[str] | None = None,
+        rtn: bool = False,
+        solar_cycle: bool = False,
+        file_names: dict | None = None,
     ) -> LoadedData:
-        """Load every dataset and return one LoadedData object."""
+        """Load every dataset and return one LoadedData object.
+
+        ``rtn``/``solar_cycle``/``file_names`` select mode-specific inputs
+        (RTN/ or SolarCycle/ directories, filenames from
+        ``config.legacy_data.file_name``) for the handful of main-simulation
+        datasets that vary by mode. Everything else is unaffected by these
+        flags.
+        """
         if isinstance(resolution, Enum):
             resolution = resolution.value
 
@@ -67,13 +96,14 @@ class DataLoader:
         return LoadedData(
             reeds_raw=self._load_reeds(),
             gis_centroids=self._load_gis(),
-            recycler_data=self._load_recycler_data(),
-            landfill_cost_df=self._load_landfill_data(),
+            recycler_data=self._load_recycler_data(rtn, file_names),
+            landfill_cost_df=self._load_landfill_cost(rtn, solar_cycle, file_names),
+            recycling_costs_raw=self._load_recycling_costs_raw(rtn, file_names),
             hazardous_landfill_cost_df=self._load_hazardous_landfill_data(),
             uw_landfill_data=self._load_csv(self._paths.uw_landfill_data),
             uw_recycler_data=self._load_csv(self._paths.uw_recycler_data),
             recycler_distance_df=self._load_csv(self._paths.recycler_distances),
-            landfill_distance_df=self._load_csv(self._paths.landfill_distances),
+            landfill_distance_df=self._load_landfill_distance(solar_cycle, file_names),
             hazardous_landfill_distance_df=self._load_csv(self._paths.hazardous_landfill_distances),
             uw_landfill_distance_df=self._load_csv(self._paths.uw_landfill_distances),
             uw_recycler_distance_df=self._load_csv(self._paths.uw_recycler_distances),
@@ -89,6 +119,38 @@ class DataLoader:
             uw_generator_thresholds=self._load_uw_generator_thresholds(),
             pca_dataout_by_pca=self._load_pca_dataout_by_pca(),
             pca_datain_by_pca=self._load_pca_datain_by_pca(),
+        )
+
+    def load_distance_generation_inputs(
+        self,
+        resolution: str | Enum,
+        model_states: list[str] | None = None,
+        rtn: bool = False,
+        solar_cycle: bool = False,
+        file_names: dict | None = None,
+    ) -> DistanceGenerationInputs:
+        """Load ONLY the facility/site inputs needed to compute distances.
+
+        No distance-file reads (and no ``_assert_exists`` on them): this is
+        what lets ``generate-distances`` bootstrap the distance CSVs that
+        ``load_all`` would otherwise require to already exist.
+        """
+        if isinstance(resolution, Enum):
+            resolution = resolution.value
+
+        resolution = str(resolution).strip().lower()
+
+        if resolution not in {"site", "pca"}:
+            raise ValueError(
+                "resolution must be either 'site' or 'pca'; "
+                f"received {resolution!r}"
+            )
+
+        return DistanceGenerationInputs(
+            recycler_data=self._load_recycler_data(rtn, file_names),
+            gis_centroids=self._load_gis(),
+            pvice_waste_eol_df=self._load_pvice_waste_eol(),
+            uspvdb=self._load_uspvdb(model_states) if resolution == "site" else None,
         )
 
     def _load_csv(self, path: Path, **kwargs: object) -> pd.DataFrame:
@@ -118,13 +180,95 @@ class DataLoader:
         self._assert_columns(df, ["id"], self._paths.gis_centroids)
         return df.set_index("id")
 
-    def _load_recycler_data(self) -> pd.DataFrame:
-        """Load recycler facility data."""
+    def _load_recycler_data(
+        self, rtn: bool = False, file_names: dict | None = None
+    ) -> pd.DataFrame:
+        """Load recycler facility data.
+
+        Mode-aware: when ``rtn`` is true, reads from the RTN/ directory
+        using the "RTN recycler data" filename; otherwise loads the
+        existing TEMP-based path unchanged.
+        """
+        if rtn:
+            return self._load_csv(
+                self._mode_path("RTN", file_names["RTN recycler data"])
+            )
+
         return self._load_csv(self._paths.recycler_data)
 
     def _load_landfill_data(self) -> pd.DataFrame:
         """Load landfill facility and cost data."""
         return self._load_csv(self._paths.landfill_data)
+
+    def _load_landfill_cost(
+        self,
+        rtn: bool = False,
+        solar_cycle: bool = False,
+        file_names: dict | None = None,
+    ) -> pd.DataFrame:
+        """Load landfill cost data, mode-aware.
+
+        rtn -> RTN/<RTN landfill data> (raw; date transform applied later
+        in the model, since it needs ``self.timestep``).
+        solar_cycle -> SolarCycle/<Solar Cycle landfill data>, index_col=0.
+        else -> existing TEMP-based landfill facility/cost file.
+        """
+        if rtn:
+            return self._load_csv(
+                self._mode_path("RTN", file_names["RTN landfill data"])
+            )
+
+        if solar_cycle:
+            return self._load_csv(
+                self._mode_path(
+                    "SolarCycle", file_names["Solar Cycle landfill data"]
+                ),
+                index_col=0,
+            )
+
+        return self._load_landfill_data()
+
+    def _load_recycling_costs_raw(
+        self, rtn: bool = False, file_names: dict | None = None
+    ) -> pd.DataFrame:
+        """Load raw RTN recycling cost data (empty when not rtn).
+
+        Date-transform is applied later in the model (needs
+        ``self.timestep``).
+        """
+        if rtn:
+            return self._load_csv(
+                self._mode_path("RTN", file_names["Recycling data"])
+            )
+
+        return pd.DataFrame()
+
+    def _load_landfill_distance(
+        self, solar_cycle: bool = False, file_names: dict | None = None
+    ) -> pd.DataFrame:
+        """Load the landfill distance matrix, mode-aware.
+
+        solar_cycle -> SolarCycle/<Solar Cycle landfill distances>, default
+        read_csv (no index_col; 'Landfill Name' stays a column).
+        else -> existing TEMP-based distance matrix.
+        """
+        if solar_cycle:
+            return self._load_csv(
+                self._mode_path(
+                    "SolarCycle", file_names["Solar Cycle landfill distances"]
+                )
+            )
+
+        return self._load_csv(self._paths.landfill_distances)
+
+    def _mode_path(self, subdir: str, filename: str) -> Path:
+        """Resolve a mode-specific data path relative to the project root.
+
+        The project root is derived from an existing DataPathsConfig path
+        (its TEMP-file parent's parent) rather than a new config field.
+        """
+        project_root = self._paths.recycler_data.parent.parent
+        return project_root / subdir / filename
 
     def _load_hazardous_landfill_data(self) -> pd.DataFrame:
         """Load hazardous-waste landfill data."""
