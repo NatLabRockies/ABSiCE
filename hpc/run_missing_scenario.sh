@@ -20,10 +20,10 @@ conda activate "<CONDA_ENV_PATH>"
 
 python hpc/run_single_scenario.py \
     --landfill-set true_landfills \
-    --cost-rate 4.81 \
+    --cost-rate 0.66 \
     --cost-component recycling \
     --rtn true \
-    --recycle-rate 0.60 \
+    --recycle-rate 0.20 \
     --n-runs 100 \
     --n-steps 11 \
     --results-base results/recycling_sensitivity

@@ -9,10 +9,11 @@ from run import cli
 
 
 def test_cli_registers_expected_commands() -> None:
-    """The CLI exposes the run, batch, and init-config commands."""
+    """The CLI exposes the run, batch, generate-distances, and init-config commands."""
     assert set(cli.commands.keys()) == {
         "run",
         "batch",
+        "generate-distances",
         "init-config",
     }
 

@@ -69,14 +69,12 @@ jobs:
     scheduler: cpu_nodes
 
     # ── Parameter sweep (Cartesian product) ─────────────────────────────────
-    # Absolute recycling cost in $/kg (RTN mode). Baseline is $0.40/kg
-    # (hpc.cost_scaling.BASELINE_RECYCLING_RATE_PER_KG); --cost-rate is
-    # converted to a scale ratio internally by run_single_scenario.py.
-    # Extend the cost_rate list to widen the sweep, e.g.:
-    #   "[0.00,2.40,4.81,7.21,9.62,12.02,14.43,16.83]"
+    # Recycling processing cost in USD/kg of an 18.9 kg module; the baseline is
+    # 12.5 USD/module = 0.6613756613756614 USD/kg. 0.2645502645502646 is
+    # 5 USD/module. Transport costs are unaffected.
     parameters:
       landfill_set: "['all_landfills','true_landfills']"
-      cost_rate: "[0.00,2.40]"
+      cost_rate: "[0.00,0.2645502645502646]"
       recycle_rate: "[0.10,0.20,0.30,0.40,0.50,0.60]"
     parameter_mode: product
 

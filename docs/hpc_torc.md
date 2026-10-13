@@ -68,7 +68,7 @@ python hpc/run_single_scenario.py --ratio 1.0 --rtn false \
 | --- | --- |
 | `--rtn {true,false}` | RTN or non-RTN mode (default `false`). |
 | `--landfill-set {all_landfills,true_landfills}` | Required in RTN mode; ignored otherwise. |
-| `--ratio FLOAT` \| `--cost-rate RATE` | Recycling-cost scale (multiplier, or $/kg). Both modes. |
+| `--ratio FLOAT` \| `--cost-rate RATE` | Recycling-cost scale (multiplier, or $/kg of an 18.9 kg module; baseline 12.5 $/module = 0.6614 $/kg). Both modes. |
 | `--recycle-rate RATE` | Initial recycle EoL rate (rebalanced to sum to 1). |
 | `--att-mean` / `--att-std` | Attitude distribution parameters. |
 | `--n-runs` / `--n-steps` | Replicates / simulation years. |

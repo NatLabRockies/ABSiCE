@@ -22,7 +22,7 @@ Usage (local smoke test, non-RTN — no --landfill-set needed):
 Usage (RTN mode, absolute $/kg cost rate):
     python hpc/run_single_scenario.py \\
         --landfill-set all_landfills \\
-        --cost-rate 12.02 \\
+        --cost-rate 1.3227 \\
         --rtn true \\
         --recycle-rate 0.20 \\
         --att-mean 0.60 \\
@@ -127,12 +127,11 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         metavar="RATE",
         help=(
-            "Absolute recycling cost rate in $/kg (e.g. 7.21 for "
-            f"baseline, {cost_scaling.BASELINE_RECYCLING_RATE_PER_KG} "
-            "is the anchor). Works in both modes (scales the RTN shipment "
-            "cost, or original_recycling_cost in $/metric ton when non-RTN). "
-            "Converted to a "
-            "ratio via hpc.cost_scaling.ratio_from_cost_rate."
+            "Absolute recycling cost rate in $/kg of an 18.9 kg module. The "
+            "baseline is 12.5 $/module = "
+            f"{cost_scaling.BASELINE_RECYCLING_RATE_PER_KG} $/kg. Works in "
+            "both modes; converted to a ratio via "
+            "hpc.cost_scaling.ratio_from_cost_rate."
         ),
     )
     parser.add_argument(
@@ -263,8 +262,8 @@ def main() -> None:
     # --cost-rate is an absolute recycling cost in $/kg. It maps to a
     # dimensionless scale ratio (cost_rate / baseline) that applies in
     # BOTH modes: in RTN mode it scales the RTN shipment cost CSV; in non-RTN
-    # mode the same ratio scales original_recycling_cost ($/metric ton). Only transport is
-    # unsupported as a single rate.
+    # mode the same ratio scales original_recycling_cost ($/module). Only
+    # transport is unsupported as a single rate.
     if args.cost_rate is not None:
         if args.cost_component == "transport":
             print(

@@ -21,15 +21,16 @@ from pathlib import Path
 
 import pandas as pd
 
+from absice.data.cost_units import BASELINE_RECYCLING_RATE_PER_KG
+
 # -----------------------------------------------------------------------------
 # Baseline constants
 # -----------------------------------------------------------------------------
 
-# Baseline recycling rate in $/kg, consistent across all RTN shipment rows.
-# RecyclingCost_$ = Shipped_kg x BASELINE_RECYCLING_RATE_PER_KG.
-# Used only to convert an absolute cost rate ($/kg) into a scale ratio for
-# RTN mode; it has no meaning for the non-RTN triangular-cost lever.
-BASELINE_RECYCLING_RATE_PER_KG: float = 7.21
+# Recycling rate in $/kg embedded in the raw RTN shipments
+# (RecyclingCost_$ = Shipped_kg x rate). Scenarios are rebased from it to
+# BASELINE_RECYCLING_RATE_PER_KG (12.5 $/module / 18.9 kg/module).
+RAW_RTN_RECYCLING_RATE_PER_KG: float = 0.40
 
 _HPC_DIR: Path = Path(__file__).parent.resolve()
 _WORKSPACE_DIR: Path = _HPC_DIR.parent
@@ -81,12 +82,13 @@ def ratio_from_cost_rate(
 
     The result is a dimensionless multiplier (cost_rate / baseline_rate) that
     applies in BOTH modes: in RTN mode it scales the shipment cost CSV; in
-    non-RTN mode the same ratio scales original_recycling_cost ($/metric ton).
+    non-RTN mode the same ratio scales original_recycling_cost ($/module).
 
     Parameters
     ----------
     cost_rate
-        Absolute recycling cost rate in $/kg (e.g. 0.40 for baseline).
+        Absolute recycling cost rate in $/kg (baseline is 12.5 $/module,
+        about 0.661 $/kg).
     baseline_rate
         Baseline rate the ratio is computed relative to
         (default: :data:`BASELINE_RECYCLING_RATE_PER_KG`).
@@ -259,8 +261,8 @@ def prepare_rtn_recycling_cost_file(
     """
     Scale RTN recycling-shipment costs and regenerate the model-facing CSV.
 
-    For ``ratio == 1.0``, no files are generated; the unscaled base
-    recycling-cost CSV already present under ``RTN/`` is used as-is.
+    ``ratio`` multiplies the 12.5 $/module baseline processing cost; the raw
+    shipments are rebased from their legacy rate first. Transport is unchanged.
 
     Parameters
     ----------
@@ -268,7 +270,7 @@ def prepare_rtn_recycling_cost_file(
         Key into :data:`LANDFILL_SETS` (``"all_landfills"`` or
         ``"true_landfills"``).
     ratio
-        Scale multiplier applied to ``RecyclingCost_$``.
+        Scale multiplier applied to the baseline ``RecyclingCost_$``.
     suffix
         Filename suffix, typically produced by :func:`build_suffix`.
     uspvdb_file
@@ -304,19 +306,11 @@ def prepare_rtn_recycling_cost_file(
 
     set_config = LANDFILL_SETS[landfill_set]
     recycling_file_prefix: str = set_config["recycling_file_prefix"]
-    base_recycling_filename: str = f"{recycling_file_prefix}.csv"
-
     rtn_dir = rtn_dir or _RTN_DIR
     rtn_dir.mkdir(parents=True, exist_ok=True)
 
-    if abs(ratio - 1.0) < 1e-9:
-        base_path = rtn_dir / base_recycling_filename
-        if not base_path.exists():
-            raise FileNotFoundError(
-                f"Base RTN recycling-cost file not found: {base_path}"
-            )
-        return base_recycling_filename
-
+    # "_rebased" keeps these apart from files made at the legacy raw rate.
+    suffix = f"_rebased{suffix}"
     recycling_filename: str = f"{recycling_file_prefix}{suffix}.csv"
     output_path: Path = rtn_dir / recycling_filename
     if output_path.exists():
@@ -349,7 +343,9 @@ def prepare_rtn_recycling_cost_file(
     else:
         scaled_shipment = _scale_shipment_file(
             file_path=shipment_file,
-            scale=ratio,
+            scale=ratio
+            * BASELINE_RECYCLING_RATE_PER_KG
+            / RAW_RTN_RECYCLING_RATE_PER_KG,
             cost_col="RecyclingCost_$",
             transport_col="TransportCost_$",
             total_col="TotalCost_$",
