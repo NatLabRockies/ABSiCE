@@ -109,6 +109,285 @@ from absice.data.data_loader import LoadedData
 from absice.schemas.simulation_config import SimulationConfig
 
 
+def filter_uspvdb_for_model(
+    uspvdb: pd.DataFrame, pvice_waste_eol_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Filter USPVDB sites down to the ones usable by the model.
+
+    Drops sites with no ReEDS PCA match, then restricts to PCAs that have
+    a PV ICE waste time series (e.g. drops p119, p122): sites without waste
+    data would create agents with no waste to process and fail downstream
+    date-based waste lookups on multi-step runs.
+    """
+    uspvdb = uspvdb[uspvdb["PCA"] != PCA_MISSING_VALUE].copy()
+    waste_pcas = set(pvice_waste_eol_df["pca"].unique())
+    uspvdb = uspvdb[uspvdb["PCA"].isin(waste_pcas)].copy()
+    return uspvdb
+
+
+def build_pca_data(gis: pd.DataFrame) -> pd.DataFrame:
+    """Build the PCA/Long/Lat table used for PCA-resolution distance
+    calculations and consumer-agent reporting, from GIS centroid data."""
+    pca_data = gis.reset_index().copy()
+    index_column = pca_data.columns[0]
+    pca_data = pca_data[[index_column, "long", "lat"]].rename(
+        columns={
+            index_column: "PCA",
+            "long": "Long",
+            "lat": "Lat",
+        }
+    )
+    return pca_data
+
+
+def write_distance_files(
+    *,
+    resolution,
+    rtn,
+    solar_cycle,
+    recycler_data,
+    uspvdb,
+    pca_data,
+    file_names,
+    landfill_data_params,
+    model_dir,
+):
+    """Compute and write all distance-matrix CSVs to the mode-specific dirs.
+
+    Side-effect only: writes CSVs to RTN/, SolarCycle/, or TEMP/ (all
+    resolved as subdirectories of ``model_dir``) and returns nothing. This
+    reproduces exactly what used to run inline inside ABM_CE_PV.__init__
+    behind a now-removed config flag, with two fixes: every formerly-relative
+    "../../../TEMP/..." path (CWD-dependent, broken under `run.py run`) is
+    now resolved as ``model_dir/TEMP/<name>``, and the duplicate
+    site_recycler_distances.csv write in the solar_cycle branch has been
+    collapsed to one write.
+
+    Note: the pre-existing RTN write(RTN/)-vs-read(TEMP) mismatch for the
+    site-level recycler distance file is intentionally left as-is (the
+    DataLoader always reads site_recycler_distances.csv from TEMP/,
+    regardless of rtn).
+    """
+
+    def _path(subdir, name):
+        return os.path.join(model_dir, subdir, name)
+
+    def _write(df, subdir, name, **kwargs):
+        path = _path(subdir, name)
+        df.to_csv(path, **kwargs)
+        print(f"Wrote {path}")
+
+    # Function to calculate the Haversine distance between two points
+    # given their latitude and longitude
+    def haversine(lat1, lon1, lat2, lon2):
+        # Convert latitude and longitude from degrees to radians
+        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+
+        # Haversine formula
+        dlon = lon2 - lon1
+        dlat = lat2 - lat1
+        a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * \
+            sin(dlon / 2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return 6371 * c  # Radius of the Earth in kilometers
+
+    def haversine_vectorized(lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
+        # Convert latitude and longitude from degrees to radians
+        lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+
+        # Haversine formula
+        # Convert inputs to 2D arrays for broadcasting
+        # Let M and N be the lengths of lat1/lon1 and lat2/lon2 respectively
+        # Before broadcasting:
+        # lat1, lon1: shape (M,)
+        # lat2, lon2: shape (N,)
+        # After broadcasting:
+        # lat2 and lon2 become shape (N, 1)
+        # Resulting distance matrix will have shape (N, M)
+        # This computes distances from each point in (lat2, lon2) to all points in (lat1, lon1)
+        dlon = lon2[:, np.newaxis] - lon1
+        dlat = lat2[:, np.newaxis] - lat1
+        a = np.sin(dlat / 2)**2 + np.cos(lat1[np.newaxis, :]) * np.cos(lat2[:, np.newaxis]) * \
+            np.sin(dlon / 2)**2
+        c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+        return 6371 * c  # Radius of the Earth in kilometers
+
+    if solar_cycle:
+        # If using the solar cycle landfill cost data
+        landfills_data = pd.read_csv(
+            _path("SolarCycle", file_names["Solar Cycle landfill data"]),
+            index_col=0,
+        )
+    else:
+        landfills_data = pd.read_csv(_path("TEMP", file_names['Landfill data']))
+
+    if resolution == ConsumerAgentResolution.PCA:
+
+        # Create an empty DataFrame to store distances
+        distance_df = pd.DataFrame(columns=pca_data['PCA'],
+                                index=recycler_data['Recycler Name'])
+        distance_df2 = pd.DataFrame(columns=pca_data['PCA'],
+                                    index=landfills_data[landfill_data_params['landfill_name_column']])
+
+        # Calculate distances between each PCA and each recycler
+        for pca_index, pca_row in pca_data.iterrows():
+            pca_lat = pca_row['Lat']
+            pca_lon = pca_row['Long']
+
+            for recycler_index, recycler_row in recycler_data.iterrows():
+                recycler_lat = recycler_row['Latitude']
+                recycler_lon = recycler_row['Longitude']
+                distance = haversine(float(pca_lat), float(pca_lon),
+                                    float(recycler_lat),
+                                    float(recycler_lon))
+
+                # Fill in the distance in the DataFrame
+                distance_df.at[recycler_row['Recycler Name'],
+                            pca_row['PCA']] = distance
+
+            for landfills_index, landfills_row in \
+                    landfills_data.iterrows():
+                landfills_lat = landfills_row['Latitude']
+                landfills_lon = landfills_row['Longitude']
+
+                distance2 = haversine(pca_lat, pca_lon,
+                                    landfills_lat, landfills_lon)
+
+                # Fill in the distance in the DataFrame
+                distance_df2.at[landfills_row[landfill_data_params['landfill_name_column']],
+                                pca_row['PCA']] = distance2
+
+        # Save the distances to a CSV file
+        if rtn:
+            # If using the RTN model results from Texas A&M University
+            # save the distances to the RTN model folder
+            _write(distance_df, "RTN", "pca_recycler_distances.csv")
+            _write(distance_df2, "RTN", file_names['PCA-landfill distances'])
+        else:
+            _write(distance_df, "TEMP", "pca_recycler_distances.csv")
+            if solar_cycle:
+                # If using the solar cycle landfill cost data
+                # save the landfill distances to the solar cycle folder
+                _write(distance_df2, "SolarCycle", file_names['PCA-landfill distances'])
+            else:
+                _write(distance_df2, "TEMP", file_names['PCA-landfill distances'])
+
+        # Calculate distances for Universal Waste Landfills (PCA resolution)
+        universal_waste_landfills_data = pd.read_csv(
+            _path("TEMP", file_names['Universal Waste Landfills data']))
+        uw_landfill_distance_df = pd.DataFrame(columns=pca_data['PCA'],
+                                    index=universal_waste_landfills_data['Facility Name'])
+
+        for pca_index, pca_row in pca_data.iterrows():
+            pca_lat = pca_row['Lat']
+            pca_lon = pca_row['Long']
+
+            for uw_landfill_index, uw_landfill_row in universal_waste_landfills_data.iterrows():
+                uw_landfill_lat = uw_landfill_row['Latitude']
+                uw_landfill_lon = uw_landfill_row['Longitude']
+
+                distance_uw_landfill = haversine(pca_lat, pca_lon,
+                                    uw_landfill_lat, uw_landfill_lon)
+
+                uw_landfill_distance_df.at[uw_landfill_row['Facility Name'],
+                                pca_row['PCA']] = distance_uw_landfill
+
+        _write(uw_landfill_distance_df, "TEMP", "universal_waste_pca_landfill_distances.csv")
+
+        # Calculate distances for Universal Waste Recyclers (PCA resolution)
+        universal_waste_recyclers_data = pd.read_csv(
+            _path("TEMP", file_names['Universal Waste Recyclers data']))
+        uw_recycler_distance_df = pd.DataFrame(columns=pca_data['PCA'],
+                                    index=universal_waste_recyclers_data['Recycler Name'])
+
+        for pca_index, pca_row in pca_data.iterrows():
+            pca_lat = pca_row['Lat']
+            pca_lon = pca_row['Long']
+
+            for uw_recycler_index, uw_recycler_row in universal_waste_recyclers_data.iterrows():
+                uw_recycler_lat = uw_recycler_row['Latitude']
+                uw_recycler_lon = uw_recycler_row['Longitude']
+
+                distance_uw_recycler = haversine(pca_lat, pca_lon,
+                                    uw_recycler_lat, uw_recycler_lon)
+
+                uw_recycler_distance_df.at[uw_recycler_row['Recycler Name'],
+                                pca_row['PCA']] = distance_uw_recycler
+
+        _write(uw_recycler_distance_df, "TEMP", "universal_waste_pca_recycler_distances.csv")
+
+    if resolution == ConsumerAgentResolution.SITE:
+
+        # Calculate distances between each site and each recycler and landfill
+
+        site_lats = uspvdb['Latitude'].to_numpy().astype(float)
+        site_lons = uspvdb['Longitude'].to_numpy().astype(float)
+        recycler_lats = recycler_data['Latitude'].to_numpy().astype(float)
+        recycler_lons = recycler_data['Longitude'].to_numpy().astype(float)
+        landfill_lats = landfills_data['Latitude'].to_numpy().astype(float)
+        landfill_lons = landfills_data['Longitude'].to_numpy().astype(float)
+
+        distance_matrix_recycler = haversine_vectorized(
+            site_lats, site_lons, recycler_lats, recycler_lons)
+        distance_matrix_landfill = haversine_vectorized(
+            site_lats, site_lons, landfill_lats, landfill_lons)
+
+        landfill_distance_df = pd.DataFrame(distance_matrix_landfill,
+                                                index=landfills_data[landfill_data_params['landfill_name_column']],
+                                                columns=uspvdb['case_id'])
+
+        site_recycler_distance_df = pd.DataFrame(distance_matrix_recycler,
+                                                index=recycler_data['Recycler Name'],
+                                                columns=uspvdb['case_id'])
+        if rtn:
+            # If using the RTN model results from Texas A&M University
+            # save the distances to the RTN model folder
+            _write(site_recycler_distance_df, "RTN", "site_recycler_distances.csv")
+            _write(landfill_distance_df, "RTN", "site_landfill_distances.csv")
+        else:
+            _write(site_recycler_distance_df, "TEMP", "site_recycler_distances.csv")
+            if solar_cycle:
+                # If using the solar cycle landfill cost data
+                # save the landfill distances to the solar cycle folder
+                _write(landfill_distance_df, "SolarCycle", "site_landfill_distances.csv")
+            else:
+                _write(landfill_distance_df, "TEMP", "site_landfill_distances.csv")
+
+        hazardous_landfills_data = pd.read_csv(_path("TEMP", "Landfills_data_SA.csv"))
+        hazardous_landfill_lats = hazardous_landfills_data['Latitude'].to_numpy().astype(float)
+        hazardous_landfill_lons = hazardous_landfills_data['Longitude'].to_numpy().astype(float)
+        hazardous_landfill_distance_matrix = haversine_vectorized(
+            site_lats, site_lons, hazardous_landfill_lats, hazardous_landfill_lons)
+        hazardous_landfill_distance_df = pd.DataFrame(hazardous_landfill_distance_matrix,
+                                                index=hazardous_landfills_data['Facility Name'],
+                                                columns=uspvdb['case_id'])
+        _write(hazardous_landfill_distance_df, "TEMP", 'hazardous_site_landfill_distances.csv')
+
+        # Calculate distances for Universal Waste Landfills
+        universal_waste_landfills_data = pd.read_csv(
+            _path("TEMP", file_names['Universal Waste Landfills data']))
+        uw_landfill_lats = universal_waste_landfills_data['Latitude'].to_numpy().astype(float)
+        uw_landfill_lons = universal_waste_landfills_data['Longitude'].to_numpy().astype(float)
+        uw_landfill_distance_matrix = haversine_vectorized(
+            site_lats, site_lons, uw_landfill_lats, uw_landfill_lons)
+        uw_landfill_distance_df = pd.DataFrame(uw_landfill_distance_matrix,
+                                                index=universal_waste_landfills_data['Facility Name'],
+                                                columns=uspvdb['case_id'])
+        _write(uw_landfill_distance_df, "TEMP", 'universal_waste_site_landfill_distances.csv')
+
+        # Calculate distances for Universal Waste Recyclers
+        universal_waste_recyclers_data = pd.read_csv(
+            _path("TEMP", file_names['Universal Waste Recyclers data']))
+        uw_recycler_lats = universal_waste_recyclers_data['Latitude'].to_numpy().astype(float)
+        uw_recycler_lons = universal_waste_recyclers_data['Longitude'].to_numpy().astype(float)
+        uw_recycler_distance_matrix = haversine_vectorized(
+            site_lats, site_lons, uw_recycler_lats, uw_recycler_lons)
+        uw_recycler_distance_df = pd.DataFrame(uw_recycler_distance_matrix,
+                                                index=universal_waste_recyclers_data['Recycler Name'],
+                                                columns=uspvdb['case_id'])
+        _write(uw_recycler_distance_df, "TEMP", 'universal_waste_site_recycler_distances.csv')
+
+
 class ABM_CE_PV(Model):
     def __init__(self, config: SimulationConfig, data: LoadedData) -> None:
         """
@@ -221,7 +500,6 @@ class ABM_CE_PV(Model):
         pca = config.data_source.pca
         pca_scenario = config.data_source.pca_scenario
         geopy = config.data_source.geopy
-        calculate_distances = config.data_source.calculate_distances
         rtn = config.data_source.rtn
         solar_cycle = config.data_source.solar_cycle
 
@@ -276,18 +554,9 @@ class ABM_CE_PV(Model):
 
             self.uspvdb = data.uspvdb.copy()
             self.reeds_data = data.reeds_data.copy()
-            self.uspvdb = self.uspvdb[
-                self.uspvdb["PCA"] != PCA_MISSING_VALUE
-            ].copy()
-            # PV ICE waste data is the authoritative waste source for this
-            # simulation. Restrict sites to PCAs that have a waste time series
-            # (e.g. drop p119, p122): sites without waste data would create
-            # agents with no waste to process and fail downstream date-based
-            # waste lookups on multi-step runs.
-            _waste_pcas = set(data.pvice_waste_eol_df["pca"].unique())
-            self.uspvdb = self.uspvdb[
-                self.uspvdb["PCA"].isin(_waste_pcas)
-            ].copy()
+            self.uspvdb = filter_uspvdb_for_model(
+                self.uspvdb, data.pvice_waste_eol_df
+            )
 
         GIS = data.gis_centroids.copy()
     
@@ -455,17 +724,7 @@ class ABM_CE_PV(Model):
 
         # Load PCA data if needed for distance calculations and for consumer agent reporting
         if self.consumer_agent_resolution == ConsumerAgentResolution.PCA:
-            self.pca_data = GIS.reset_index().copy()
-            index_column = self.pca_data.columns[0]
-            self.pca_data = self.pca_data[
-                [index_column, "long", "lat"]
-            ].rename(
-                columns={
-                    index_column: "PCA",
-                    "long": "Long",
-                    "lat": "Lat",
-                }
-            )
+            self.pca_data = build_pca_data(GIS)
 
         if pv_ice:
 
@@ -487,234 +746,6 @@ class ABM_CE_PV(Model):
 
             self.df2 = r1.scenario['standard'].material['silicon'].matdataOut_m
             self.df2.to_csv("df2_matdataout.csv", index=False)
-
-        if calculate_distances:
-            # Function to calculate the Haversine distance between two points
-            # given their latitude and longitude
-            def haversine(lat1, lon1, lat2, lon2):
-                # Convert latitude and longitude from degrees to radians
-                lat1, lon1, lat2, lon2 = map(radians,
-                                             [lat1, lon1, lat2, lon2])
-
-                # Haversine formula
-                dlon = lon2 - lon1
-                dlat = lat2 - lat1
-                a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * \
-                    sin(dlon / 2)**2
-                c = 2 * atan2(sqrt(a), sqrt(1 - a))
-                return 6371 * c  # Radius of the Earth in kilometers
-
-            def haversine_vectorized(lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
-                # Convert latitude and longitude from degrees to radians
-                lat1, lon1, lat2, lon2 = map(np.radians,
-                                             [lat1, lon1, lat2, lon2])
-
-                # Haversine formula
-                # Convert inputs to 2D arrays for broadcasting
-                # Let M and N be the lengths of lat1/lon1 and lat2/lon2 respectively
-                # Before broadcasting:
-                # lat1, lon1: shape (M,)
-                # lat2, lon2: shape (N,)
-                # After broadcasting: 
-                # lat2 and lon2 become shape (N, 1)
-                # Resulting distance matrix will have shape (N, M)
-                # This computes distances from each point in (lat2, lon2) to all points in (lat1, lon1)
-                dlon = lon2[:, np.newaxis] - lon1 
-                dlat = lat2[:, np.newaxis] - lat1 
-                a = np.sin(dlat / 2)**2 + np.cos(lat1[np.newaxis, :]) * np.cos(lat2[:, np.newaxis]) * \
-                    np.sin(dlon / 2)**2
-                c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-                return 6371 * c  # Radius of the Earth in kilometers
-            
-            if self.solar_cycle:
-                # If using the solar cycle landfill cost data
-                landfills_data = pd.read_csv(os.path.join(
-                    os.path.dirname(__file__),
-                    "SolarCycle", "wbj_solar_cycle_combined.csv"),
-                    index_col=0)
-                
-            else:
-                landfills_data = pd.read_csv("../../../TEMP/" +
-                                                self.file_names['Landfill data'])
-                
-            if self.consumer_agent_resolution == ConsumerAgentResolution.PCA:
-
-                # Create an empty DataFrame to store distances
-                distance_df = pd.DataFrame(columns=self.pca_data['PCA'],
-                                        index=self.recycler_data['Recycler Name'])
-                distance_df2 = pd.DataFrame(columns=self.pca_data['PCA'],
-                                            index=landfills_data[self.landfill_data_params['landfill_name_column']])
-
-                # Calculate distances between each PCA and each recycler
-                for pca_index, pca_row in self.pca_data.iterrows():
-                    pca_lat = pca_row['Lat']
-                    pca_lon = pca_row['Long']
-
-                    for recycler_index, recycler_row in self.recycler_data.iterrows():
-                        recycler_lat = recycler_row['Latitude']
-                        recycler_lon = recycler_row['Longitude']
-                        distance = haversine(float(pca_lat), float(pca_lon),
-                                            float(recycler_lat),
-                                            float(recycler_lon))
-
-                        # Fill in the distance in the DataFrame
-                        distance_df.at[recycler_row['Recycler Name'],
-                                    pca_row['PCA']] = distance
-
-                    for landfills_index, landfills_row in \
-                            landfills_data.iterrows():
-                        landfills_lat = landfills_row['Latitude']
-                        landfills_lon = landfills_row['Longitude']
-
-                        distance2 = haversine(pca_lat, pca_lon,
-                                            landfills_lat, landfills_lon)
-
-                        # Fill in the distance in the DataFrame
-                        distance_df2.at[landfills_row[self.landfill_data_params['landfill_name_column']],
-                                        pca_row['PCA']] = distance2
-
-                # Save the distances to a CSV file
-                if self.rtn:
-                    # If using the RTN model results from Texas A&M University
-                    # save the distances to the RTN model folder
-                    distance_df.to_csv(os.path.join(os.path.dirname(__file__), "RTN", "pca_recycler_distances.csv"))
-                    distance_df2.to_csv(os.path.join(os.path.dirname(__file__), "RTN",
-                                                    self.file_names['PCA-landfill distances']))                   
-                else:
-                    distance_df.to_csv("../../../TEMP/pca_recycler_distances.csv")
-                    if self.solar_cycle:
-                        # If using the solar cycle landfill cost data
-                        # save the landfill distances to the solar cycle folder
-                        distance_df2.to_csv(os.path.join(
-                        os.path.dirname(__file__), "SolarCycle",
-                        self.file_names['PCA-landfill distances']))
-                    else:
-                        distance_df2.to_csv("../../../TEMP/" +
-                                        self.file_names['PCA-landfill distances'])
-
-                # Calculate distances for Universal Waste Landfills (PCA resolution)
-                universal_waste_landfills_data = pd.read_csv("../../../TEMP/" + self.file_names['Universal Waste Landfills data'])
-                uw_landfill_distance_df = pd.DataFrame(columns=self.pca_data['PCA'],
-                                            index=universal_waste_landfills_data['Facility Name'])
-                
-                for pca_index, pca_row in self.pca_data.iterrows():
-                    pca_lat = pca_row['Lat']
-                    pca_lon = pca_row['Long']
-                    
-                    for uw_landfill_index, uw_landfill_row in universal_waste_landfills_data.iterrows():
-                        uw_landfill_lat = uw_landfill_row['Latitude']
-                        uw_landfill_lon = uw_landfill_row['Longitude']
-                        
-                        distance_uw_landfill = haversine(pca_lat, pca_lon,
-                                            uw_landfill_lat, uw_landfill_lon)
-                        
-                        uw_landfill_distance_df.at[uw_landfill_row['Facility Name'],
-                                        pca_row['PCA']] = distance_uw_landfill
-                
-                uw_landfill_distance_df.to_csv("../../../TEMP/universal_waste_pca_landfill_distances.csv")
-                
-                # Calculate distances for Universal Waste Recyclers (PCA resolution)
-                universal_waste_recyclers_data = pd.read_csv("../../../TEMP/" + self.file_names['Universal Waste Recyclers data'])
-                uw_recycler_distance_df = pd.DataFrame(columns=self.pca_data['PCA'],
-                                            index=universal_waste_recyclers_data['Recycler Name'])
-                
-                for pca_index, pca_row in self.pca_data.iterrows():
-                    pca_lat = pca_row['Lat']
-                    pca_lon = pca_row['Long']
-                    
-                    for uw_recycler_index, uw_recycler_row in universal_waste_recyclers_data.iterrows():
-                        uw_recycler_lat = uw_recycler_row['Latitude']
-                        uw_recycler_lon = uw_recycler_row['Longitude']
-                        
-                        distance_uw_recycler = haversine(pca_lat, pca_lon,
-                                            uw_recycler_lat, uw_recycler_lon)
-                        
-                        uw_recycler_distance_df.at[uw_recycler_row['Recycler Name'],
-                                        pca_row['PCA']] = distance_uw_recycler
-                
-                uw_recycler_distance_df.to_csv("../../../TEMP/universal_waste_pca_recycler_distances.csv")
-                
-            if self.consumer_agent_resolution == ConsumerAgentResolution.SITE:
-
-                # Calculate distances between each site and each recycler and landfill
-                
-                site_lats = self.uspvdb['Latitude'].to_numpy().astype(float)
-                site_lons = self.uspvdb['Longitude'].to_numpy().astype(float)
-                recycler_lats = self.recycler_data['Latitude'].to_numpy().astype(float)
-                recycler_lons = self.recycler_data['Longitude'].to_numpy().astype(float)
-                landfill_lats = landfills_data['Latitude'].to_numpy().astype(float)
-                landfill_lons = landfills_data['Longitude'].to_numpy().astype(float)
-
-                distance_matrix_recycler = haversine_vectorized(
-                    site_lats, site_lons, recycler_lats, recycler_lons)
-                distance_matrix_landfill = haversine_vectorized(
-                    site_lats, site_lons, landfill_lats, landfill_lons)
-                
-                landfill_distance_df = pd.DataFrame(distance_matrix_landfill,
-                                                        index=landfills_data[self.landfill_data_params['landfill_name_column']],
-                                                        columns=self.uspvdb['case_id'])
-                                                    
-                site_recycler_distance_df = pd.DataFrame(distance_matrix_recycler,
-                                                        index=self.recycler_data['Recycler Name'],
-                                                        columns=self.uspvdb['case_id'])
-                if self.rtn:
-                    # If using the RTN model results from Texas A&M University
-                    # save the distances to the RTN model folder
-                    site_recycler_distance_df.to_csv(os.path.join(
-                        os.path.dirname(__file__), "RTN",
-                        "site_recycler_distances.csv"))
-                    landfill_distance_df.to_csv(os.path.join(
-                        os.path.dirname(__file__), "RTN",
-                        "site_landfill_distances.csv"))
-                else:
-                    site_recycler_distance_df.to_csv("../../../TEMP/site_recycler_distances.csv")
-                    if self.solar_cycle:
-                        # If using the solar cycle landfill cost data
-                        # save the landfill distances to the solar cycle folder
-                        site_recycler_distance_df.to_csv("../../../TEMP/site_recycler_distances.csv")
-                        landfill_distance_df.to_csv(os.path.join(
-                            os.path.dirname(__file__), "SolarCycle",
-                            "site_landfill_distances.csv"))
-                    else:
-                        landfill_distance_df.to_csv("../../../TEMP/site_landfill_distances.csv")
-
-                hazardous_landfills_data = pd.read_csv("../../../TEMP/Landfills_data_SA.csv")
-                hazardous_landfill_lats = hazardous_landfills_data['Latitude'].to_numpy().astype(float)
-                hazardous_landfill_lons = hazardous_landfills_data['Longitude'].to_numpy().astype(float)
-                hazardous_landfill_distance_matrix = haversine_vectorized(
-                    site_lats, site_lons, hazardous_landfill_lats, hazardous_landfill_lons)
-                hazardous_landfill_distance_df = pd.DataFrame(hazardous_landfill_distance_matrix,
-                                                        index=hazardous_landfills_data['Facility Name'],
-                                                        columns=self.uspvdb['case_id'])
-                hazardous_landfill_distance_df.to_csv(
-                    os.path.join(
-                        os.path.dirname(__file__), "TEMP", 'hazardous_site_landfill_distances.csv'))
-
-                # Calculate distances for Universal Waste Landfills
-                universal_waste_landfills_data = pd.read_csv("../../../TEMP/" + self.file_names['Universal Waste Landfills data'])
-                uw_landfill_lats = universal_waste_landfills_data['Latitude'].to_numpy().astype(float)
-                uw_landfill_lons = universal_waste_landfills_data['Longitude'].to_numpy().astype(float)
-                uw_landfill_distance_matrix = haversine_vectorized(
-                    site_lats, site_lons, uw_landfill_lats, uw_landfill_lons)
-                uw_landfill_distance_df = pd.DataFrame(uw_landfill_distance_matrix,
-                                                        index=universal_waste_landfills_data['Facility Name'],
-                                                        columns=self.uspvdb['case_id'])
-                uw_landfill_distance_df.to_csv(
-                    os.path.join(
-                        os.path.dirname(__file__), "TEMP", 'universal_waste_site_landfill_distances.csv'))
-
-                # Calculate distances for Universal Waste Recyclers
-                universal_waste_recyclers_data = pd.read_csv("../../../TEMP/" + self.file_names['Universal Waste Recyclers data'])
-                uw_recycler_lats = universal_waste_recyclers_data['Latitude'].to_numpy().astype(float)
-                uw_recycler_lons = universal_waste_recyclers_data['Longitude'].to_numpy().astype(float)
-                uw_recycler_distance_matrix = haversine_vectorized(
-                    site_lats, site_lons, uw_recycler_lats, uw_recycler_lons)
-                uw_recycler_distance_df = pd.DataFrame(uw_recycler_distance_matrix,
-                                                        index=universal_waste_recyclers_data['Recycler Name'],
-                                                        columns=self.uspvdb['case_id'])
-                uw_recycler_distance_df.to_csv(
-                    os.path.join(
-                        os.path.dirname(__file__), "TEMP", 'universal_waste_site_recycler_distances.csv'))
 
         self.correct_mat_factor = data.correct_mat_factor.copy()
         self.hazardous_landfill_cost_df = (
@@ -754,44 +785,16 @@ class ABM_CE_PV(Model):
         )
 
         if self.rtn:
-            # RTN cost data has not yet been added to LoadedData.
-            self.recycling_costs_df = pd.read_csv(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "RTN",
-                    self.file_names["Recycling data"],
-                )
-            )
+            # RTN cost frames are loaded (raw) by the DataLoader; apply the
+            # timestep-dependent date transform here since it needs self.timestep.
             self.recycling_costs_df = add_date_from_temporal_columns(
-                self.recycling_costs_df, self.timestep
+                data.recycling_costs_raw.copy(), self.timestep
+            )
+            self.landfill_cost_df = add_date_from_temporal_columns(
+                data.landfill_cost_df.copy(), self.timestep
             )
         else:
             self.recycling_costs_df = pd.DataFrame()
-
-        if self.rtn:
-            # RTN landfill cost data is RTN-shaped (case_id/date/Landfill Name/Cost)
-            # and lives in the RTN/ directory, parallel to the recycling data above.
-            self.landfill_cost_df = pd.read_csv(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "RTN",
-                    self.file_names["RTN landfill data"],
-                )
-            )
-            self.landfill_cost_df = add_date_from_temporal_columns(
-                self.landfill_cost_df, self.timestep
-            )
-        elif self.solar_cycle:
-            # Solar Cycle data remains a temporary legacy input.
-            self.landfill_cost_df = pd.read_csv(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "SolarCycle",
-                    "wbj_solar_cycle_combined.csv",
-                ),
-                index_col=0,
-            )
-        else:
             self.landfill_cost_df = data.landfill_cost_df.copy()
 
         self.pv_ice_yearly_waste = 0

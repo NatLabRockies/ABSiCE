@@ -91,6 +91,51 @@ def run(
     )
 
 
+@cli.command("generate-distances")
+@click.option(
+    "--config",
+    "-c",
+    default="config/default_simulation.yaml",
+    show_default=True,
+    type=click.Path(
+        exists=True,
+        dir_okay=False,
+        path_type=Path,
+    ),
+    help="Path to the simulation configuration YAML.",
+)
+@click.option(
+    "--paths",
+    "-p",
+    default=None,
+    type=click.Path(
+        exists=True,
+        dir_okay=False,
+        path_type=Path,
+    ),
+    help="Optional path to the data-paths YAML file.",
+)
+def generate_distances(
+    config: Path,
+    paths: Path | None,
+) -> None:
+    """
+    Generate distance-matrix CSVs for the mode(s) in the given config.
+
+    Writes to RTN/, SolarCycle/, or TEMP/ (selected by the config's
+    rtn/solar_cycle flags) and returns without running a simulation. Run
+    this once before `run`/`batch` whenever the underlying facility data
+    changes.
+    """
+    from absice.runner import generate_distances as _generate_distances
+
+    _generate_distances(
+        config_path=config,
+        paths_yaml=paths,
+        project_root=PROJECT_ROOT,
+    )
+
+
 @cli.command()
 @click.option(
     "--config",

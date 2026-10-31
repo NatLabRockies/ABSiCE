@@ -132,7 +132,6 @@ if __name__ == '__main__':
         "pca": False,
         "pca_scenario": False,
         "geopy": False,
-        "calculate_distances": False,
         "last_step": last_step}
 
     # The variables parameters will be invoke along with the fixed parameters
