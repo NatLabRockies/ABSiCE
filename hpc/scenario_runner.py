@@ -4,10 +4,12 @@ RTN-optional scenario runner core for HPC calibration / recycling-sensitivity
 runs.
 
 This module builds one fully-resolved :class:`SimulationConfig` per scenario
-on top of ``hpc/rtn_base.yaml``, writes it to a per-scenario YAML file, and
-dispatches replicate runs through the existing :func:`absice.runner.run_batch`
-process pool. It does not re-implement parallel execution, seeding, or CSV
-writing — those responsibilities stay in ``absice/runner.py``.
+from ``config/default_simulation.yaml`` (plus ``config/rtn_settings.yaml`` for
+RTN runs), writes it to a per-scenario YAML
+file, and dispatches replicate runs through the existing
+:func:`absice.runner.run_batch` process pool. It does not re-implement
+parallel execution, seeding, or CSV writing — those responsibilities stay in
+``absice.runner.py``.
 
 The scenario runner works whether or not RTN is enabled
 (``config.data_source.rtn``):
@@ -35,6 +37,8 @@ Transport-cost sensitivity is out of scope this session.
 
 from pathlib import Path
 
+import yaml
+
 from hpc import cost_scaling
 from absice.runner import run_batch
 from absice.schemas.simulation_config import SimulationConfig
@@ -42,7 +46,32 @@ from utils import TIMESTEP
 
 _HPC_DIR: Path = Path(__file__).parent.resolve()
 _PROJECT_ROOT: Path = _HPC_DIR.parent
-_BASE_CONFIG_PATH: Path = _HPC_DIR / "rtn_base.yaml"
+_BASE_CONFIG_PATH: Path = _PROJECT_ROOT / "config" / "default_simulation.yaml"
+_RTN_SETTINGS_PATH: Path = _PROJECT_ROOT / "config" / "rtn_settings.yaml"
+
+
+def _read_settings(path: Path) -> dict[str, object]:
+    """Read a YAML settings file that must contain a mapping."""
+    with path.open(encoding="utf-8") as settings_handle:
+        settings = yaml.safe_load(settings_handle)
+    if not isinstance(settings, dict):
+        raise ValueError(f"Settings must be a YAML mapping: {path}")
+    return settings
+
+
+def _apply_settings(
+    settings: dict[str, object],
+    changes: dict[str, object],
+) -> dict[str, object]:
+    """Apply run-specific settings to the shared settings."""
+    updated = dict(settings)
+    for key, value in changes.items():
+        current = updated.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            updated[key] = _apply_settings(current, value)
+        else:
+            updated[key] = value
+    return updated
 
 
 def run_scenario(
@@ -58,6 +87,7 @@ def run_scenario(
     rtn: bool,
     workers: int | None = None,
     project_root: Path | None = None,
+    settings_file: Path | None = None,
 ) -> list[Path]:
     """
     Build, write, and execute one calibration / sensitivity scenario.
@@ -92,9 +122,9 @@ def run_scenario(
         Base directory under which the scenario's output subdirectory
         tree is created.
     recycle_rate
-        Initial recycling EoL rate (0.0-1.0). The delta versus the base
-        config's own baseline recycle rate is subtracted from the landfill
-        rate so all EoL rates continue to sum to 1.
+        Initial recycling EoL rate (0.0-1.0). The landfill share is set to
+        the remaining amount after the other pathway shares and this rate,
+        so all EoL rates sum to 1.
     att_mean
         Mean of the attitude-toward-recycling distribution
         (``tpb.att_distrib_param_eol[0]``). An ``att_mean_X.XX/``
@@ -112,6 +142,9 @@ def run_scenario(
     project_root
         Root directory of the ABSiCE repository. Defaults to the parent of
         this file's directory.
+    settings_file
+        Optional YAML file with run-specific settings, applied after the RTN
+        settings. Relative paths are resolved from ``project_root``.
 
     Returns
     -------
@@ -150,8 +183,20 @@ def run_scenario(
     )
     results_base = Path(results_base).resolve()
 
-    # ── 1. Load the pinned published-run base config ─────────────────────
-    config = SimulationConfig.from_yaml(_BASE_CONFIG_PATH)
+    # ── 1. Load the default settings, then RTN and run-specific changes ──
+    config_settings = _read_settings(_BASE_CONFIG_PATH)
+    if rtn:
+        config_settings = _apply_settings(
+            config_settings, _read_settings(_RTN_SETTINGS_PATH)
+        )
+    if settings_file is not None:
+        settings_path = Path(settings_file)
+        if not settings_path.is_absolute():
+            settings_path = project_root / settings_path
+        config_settings = _apply_settings(
+            config_settings, _read_settings(settings_path.resolve())
+        )
+    config = SimulationConfig.model_validate(config_settings)
 
     # Capture base-config baselines *before* mutating, so the rebalancing
     # and att_mean-subdirectory logic stay config-driven instead of relying
@@ -165,10 +210,12 @@ def run_scenario(
     config.run.timestep = TIMESTEP.QUARTERLY
     config.run.last_step = n_steps * 4
 
-    baseline_recycle = base_init_eol_rate["recycle"]
-    landfill_rate = base_init_eol_rate["landfill"] - (
-        recycle_rate - baseline_recycle
+    other_pathways_rate = sum(
+        rate
+        for pathway, rate in base_init_eol_rate.items()
+        if pathway not in {"recycle", "landfill"}
     )
+    landfill_rate = 1.0 - other_pathways_rate - recycle_rate
     new_init_eol_rate = {
         **base_init_eol_rate,
         "recycle": recycle_rate,

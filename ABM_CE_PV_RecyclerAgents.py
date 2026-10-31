@@ -30,7 +30,7 @@ class Recyclers(Agent):
             ($/metric ton). Set via config (config.cost.original_recycling_cost);
             read from self.model.original_recycling_cost (NOT
             self.model.config.cost.*).
-        init_eol_rate["recycle"] (initial recycle EOL ratio), (default=0.1).
+        init_eol_rate["recycle"] (initial recycle EOL ratio), (default=0.2).
             From Monteiro Lunardi et al 2018 and European Commission (2015).
             (self.model.config.eol.init_eol_rate)
         recycling_learning_shape_factor, (default=-0.39). From Qiu & Suh 2019.

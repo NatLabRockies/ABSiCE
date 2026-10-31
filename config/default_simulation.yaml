@@ -79,8 +79,8 @@ eol:
   init_eol_rate:
     repair: 0.005
     sell: 0.01
-    recycle: 0.15
-    landfill: 0.8
+    recycle: 0.2
+    landfill: 0.785
     hoard: 0.0
   all_eol_pathways:
     repair: true
@@ -364,7 +364,7 @@ scenario:
     discount: 0.35
   hazardous_waste_regulation_enabled: false
   # Research by Taylor Curtis.
-  landfill_solar_waste_acceptance_ratio: 0.4
+  landfill_solar_waste_acceptance_ratio: 1.0
 # Defaults from Li, F., Tatapudi, S. R., Shaw, S. L., Libby, C., Bicer, B., &
 # TamizhMani, G. (2025). Photovoltaic module leach testing: Database
 # development and statistical analysis. Journal of Environmental Management,

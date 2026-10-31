@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from absice.data.cost_units import BASELINE_RECYCLING_RATE_PER_KG
+from absice.data.cost_units import BASELINE_RECYCLING_COST_RATE_PER_KG
 
 # -----------------------------------------------------------------------------
 # Baseline constants
@@ -29,8 +29,8 @@ from absice.data.cost_units import BASELINE_RECYCLING_RATE_PER_KG
 
 # Recycling rate in $/kg embedded in the raw RTN shipments
 # (RecyclingCost_$ = Shipped_kg x rate). Scenarios are rebased from it to
-# BASELINE_RECYCLING_RATE_PER_KG (12.5 $/module / 18.9 kg/module).
-RAW_RTN_RECYCLING_RATE_PER_KG: float = 0.40
+# BASELINE_RECYCLING_COST_RATE_PER_KG (12.5 $/module / 18.9 kg/module).
+RAW_RTN_RECYCLING_COST_RATE_PER_KG: float = 0.66
 
 _HPC_DIR: Path = Path(__file__).parent.resolve()
 _WORKSPACE_DIR: Path = _HPC_DIR.parent
@@ -75,7 +75,7 @@ LANDFILL_SETS: dict[str, dict[str, str]] = {
 # -----------------------------------------------------------------------------
 def ratio_from_cost_rate(
     cost_rate: float,
-    baseline_rate: float = BASELINE_RECYCLING_RATE_PER_KG,
+    baseline_rate: float = BASELINE_RECYCLING_COST_RATE_PER_KG,
 ) -> float:
     """
     Convert an absolute recycling cost rate ($/kg) into a scale ratio.
@@ -91,7 +91,7 @@ def ratio_from_cost_rate(
         about 0.661 $/kg).
     baseline_rate
         Baseline rate the ratio is computed relative to
-        (default: :data:`BASELINE_RECYCLING_RATE_PER_KG`).
+        (default: :data:`BASELINE_RECYCLING_COST_RATE_PER_KG`).
 
     Returns
     -------
@@ -344,8 +344,8 @@ def prepare_rtn_recycling_cost_file(
         scaled_shipment = _scale_shipment_file(
             file_path=shipment_file,
             scale=ratio
-            * BASELINE_RECYCLING_RATE_PER_KG
-            / RAW_RTN_RECYCLING_RATE_PER_KG,
+            * BASELINE_RECYCLING_COST_RATE_PER_KG
+            / RAW_RTN_RECYCLING_COST_RATE_PER_KG,
             cost_col="RecyclingCost_$",
             transport_col="TransportCost_$",
             total_col="TotalCost_$",

@@ -1,0 +1,13 @@
+# Applied on top of config/default_simulation.yaml for RTN runs only.
+data_source:
+  rtn: true
+consumer:
+  # RTN shipment data covers sites in these states only.
+  model_states:
+  - TX
+  - AZ
+  - NV
+  - NM
+scenario:
+  # Published RTN runs keep every landfill; values below 1.0 drop sites at random.
+  landfill_solar_waste_acceptance_ratio: 1.0

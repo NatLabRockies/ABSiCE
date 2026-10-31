@@ -56,7 +56,7 @@ if str(_WORKSPACE_DIR) not in sys.path:
 from hpc import cost_scaling  # noqa: E402
 from hpc.scenario_runner import run_scenario  # noqa: E402
 
-# Default attitude mean — matches hpc/rtn_base.yaml's
+# Default attitude mean — matches config/default_simulation.yaml's
 # tpb.att_distrib_param_eol[0] baseline. Runs that do not pass --att-mean
 # use this value and the output path is unchanged (no att_mean_X.XX
 # subdirectory inserted; see hpc/scenario_runner.py's own base-config
@@ -129,7 +129,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Absolute recycling cost rate in $/kg of an 18.9 kg module. The "
             "baseline is 12.5 $/module = "
-            f"{cost_scaling.BASELINE_RECYCLING_RATE_PER_KG} $/kg. Works in "
+            f"{cost_scaling.BASELINE_RECYCLING_COST_RATE_PER_KG} $/kg. Works in "
             "both modes; converted to a ratio via "
             "hpc.cost_scaling.ratio_from_cost_rate."
         ),
@@ -188,13 +188,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recycle-rate",
         type=float,
-        default=0.10,
+        default=0.20,
         metavar="RATE",
         help=(
-            "Initial recycling EoL rate (0.0-1.0). The delta vs the base "
-            "config's own baseline recycle rate is subtracted from the "
-            "landfill rate so all rates sum to 1. Default: 0.10 "
-            "(hpc/rtn_base.yaml baseline). Results go into a "
+            "Initial recycling EoL rate (0.0-1.0). The landfill share is "
+            "adjusted so all pathway rates sum to 1. Default: 0.20. "
+            "Results go into a "
             "recycle_rate_<XX>pct/ subdirectory."
         ),
     )
@@ -229,6 +228,17 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Number of parallel worker processes for run_batch. Defaults "
             "to the available CPU count."
+        ),
+    )
+    parser.add_argument(
+        "--settings-file",
+        type=Path,
+        default=None,
+        metavar="YAML",
+        help=(
+            "Optional YAML file with settings for this run. It is applied to "
+            "config/default_simulation.yaml (after config/rtn_settings.yaml "
+            "when --rtn true). Relative paths start from the project folder."
         ),
     )
     return parser.parse_args()
@@ -289,6 +299,7 @@ def main() -> None:
         f"  recycle_rate={args.recycle_rate:.0%}\n"
         f"  att_distrib_param_eol=[{args.att_mean}, {args.att_std}]\n"
         f"  n_runs={args.n_runs}  n_steps={args.n_steps}\n"
+        f"  settings_file={args.settings_file}\n"
         f"  results_base={args.results_base}\n",
         flush=True,
     )
@@ -305,6 +316,7 @@ def main() -> None:
         att_std=args.att_std,
         rtn=rtn,
         workers=args.workers,
+        settings_file=args.settings_file,
     )
 
     print(

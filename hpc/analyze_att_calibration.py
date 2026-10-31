@@ -2,9 +2,9 @@
 """
 Analyse att_distrib_param_eol calibration sweep results.
 
-Reads Results_agents_consumers_run_*.csv files from
-results/att_calibration/att_mean_X.XX/**/ and computes the mean recycling
-rate for each att_mean value.  Recycling rate is defined as:
+Reads Results_agents_consumers_run_*.csv files from the directory supplied
+with --results-base and computes the mean recycling rate for each att_mean
+value. Recycling rate is defined as:
 
     recycling_rate = sum("Waste Recycle (Kg)") / sum(all 5 waste columns)
 
@@ -28,8 +28,8 @@ either shape unchanged. RTN mode is not required — this analyzer has no
 RTN-specific assumptions of its own.
 
 Outputs:
-  results/att_calibration/calibration_curve.csv
-  results/att_calibration/calibration_curve.png
+    <results-base>/calibration_curve.csv
+    <results-base>/calibration_curve.png
 
 Usage:
     python hpc/analyze_att_calibration.py

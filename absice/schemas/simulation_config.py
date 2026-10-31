@@ -260,8 +260,8 @@ class EolConfig(ConfigBaseModel):
         default_factory=lambda: {
             "repair": 0.005,
             "sell": 0.01,
-            "recycle": 0.1,
-            "landfill": 0.885,
+            "recycle": 0.2,
+            "landfill": 0.785,
             "hoard": 0.0,
         }
     )

@@ -69,14 +69,17 @@ python hpc/run_single_scenario.py --ratio 1.0 --rtn false \
 | `--rtn {true,false}` | RTN or non-RTN mode (default `false`). |
 | `--landfill-set {all_landfills,true_landfills}` | Required in RTN mode; ignored otherwise. |
 | `--ratio FLOAT` \| `--cost-rate RATE` | Recycling-cost scale (multiplier, or $/kg of an 18.9 kg module; baseline 12.5 $/module = 0.6614 $/kg). Both modes. |
-| `--recycle-rate RATE` | Initial recycle EoL rate (rebalanced to sum to 1). |
+| `--recycle-rate RATE` | Initial recycle EoL rate (default 0.20; landfill adjusted so rates sum to 1). |
 | `--att-mean` / `--att-std` | Attitude distribution parameters. |
 | `--n-runs` / `--n-steps` | Replicates / simulation years. |
 | `--results-base DIR` | Output base directory. |
+| `--settings-file YAML` | Optional settings file that replaces selected values in the default config; relative paths start from the project folder. |
 
-Base config: `hpc/rtn_base.yaml`. **RTN** (`--rtn true`) reads cost CSVs from
-`RTN/` and requires `RTN_Data`; **non-RTN** scales
-`config.cost.original_recycling_cost` directly (no RTN data).
+Every run starts from `config/default_simulation.yaml`. RTN runs then apply
+`config/rtn_settings.yaml` (the RTN states and landfill acceptance ratio),
+followed by any `--settings-file`.
+**RTN** (`--rtn true`) reads cost CSVs from `RTN/` and requires `RTN_Data`;
+**non-RTN** scales `config.cost.original_recycling_cost` directly (no RTN data).
 
 ## Output
 
@@ -89,8 +92,13 @@ Base config: `hpc/rtn_base.yaml`. **RTN** (`--rtn true`) reads cost CSVs from
 
 `<label>` is `RTN_run_<landfill_set>` (RTN) or `run` (non-RTN).
 
-Analyse a calibration sweep:
+The calibration TORC spec uses a `condition` parameter to select one settings
+file and one results folder per condition. The example names `scenario_a` and
+`scenario_b` are placeholders: create one settings file for each condition
+named `hpc/run_settings_<condition>.yaml`, then change the condition list and
+results paths in the spec to match. Analyse a condition by supplying its
+results folder:
 
 ```bash
-python hpc/analyze_att_calibration.py --results-base results/att_calibration
+python hpc/analyze_att_calibration.py --results-base results/att_calibration/<condition>
 ```

@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 
 from absice.data.cost_units import (
-    BASELINE_RECYCLING_RATE_PER_KG,
+    BASELINE_RECYCLING_COST_RATE_PER_KG,
+    BASELINE_RECYCLING_COST_PER_MODULE,
     MODULES_PER_METRIC_TON,
 )
 from absice.schemas.simulation_config import CostConfig, SimulationConfig
@@ -17,11 +18,12 @@ def test_baseline_recycling_cost_is_12_5_per_module() -> None:
     """12.5 $/module is 12.5 / 18.9 $/kg, and the config holds it in $/metric ton."""
     cost: CostConfig = CostConfig()
 
-    assert BASELINE_RECYCLING_RATE_PER_KG == pytest.approx(12.5 / 18.9)
+    assert BASELINE_RECYCLING_COST_RATE_PER_KG == pytest.approx(12.5 / 18.9)
+    assert BASELINE_RECYCLING_COST_PER_MODULE == pytest.approx(12.5)
     assert cost.original_recycling_cost[2] == pytest.approx(
-        BASELINE_RECYCLING_RATE_PER_KG * 1000
+        BASELINE_RECYCLING_COST_RATE_PER_KG * 1000
     )
-    assert cost_scaling.ratio_from_cost_rate(BASELINE_RECYCLING_RATE_PER_KG) == 1.0
+    assert cost_scaling.ratio_from_cost_rate(BASELINE_RECYCLING_COST_RATE_PER_KG) == 1.0
 
 
 def test_only_monetary_fields_are_converted() -> None:
@@ -71,15 +73,15 @@ def test_rtn_shipments_are_rebased_and_keep_transport(tmp_path: Path) -> None:
     shipments: Path = tmp_path / "shipments.csv"
     pd.DataFrame({
         "Shipped_kg": [18.9],
-        "RecyclingCost_$": [18.9 * cost_scaling.RAW_RTN_RECYCLING_RATE_PER_KG],
+        "RecyclingCost_$": [18.9 * cost_scaling.RAW_RTN_RECYCLING_COST_RATE_PER_KG],
         "TransportCost_$": [2.0],
-        "TotalCost_$": [18.9 * cost_scaling.RAW_RTN_RECYCLING_RATE_PER_KG + 2.0],
+        "TotalCost_$": [18.9 * cost_scaling.RAW_RTN_RECYCLING_COST_RATE_PER_KG + 2.0],
     }).to_csv(shipments, index=False)
 
     scaled: Path = cost_scaling._scale_shipment_file(
         file_path=shipments,
-        scale=2.0 * BASELINE_RECYCLING_RATE_PER_KG
-        / cost_scaling.RAW_RTN_RECYCLING_RATE_PER_KG,
+        scale=2.0 * BASELINE_RECYCLING_COST_RATE_PER_KG
+        / cost_scaling.RAW_RTN_RECYCLING_COST_RATE_PER_KG,
         cost_col="RecyclingCost_$",
         transport_col="TransportCost_$",
         total_col="TotalCost_$",
